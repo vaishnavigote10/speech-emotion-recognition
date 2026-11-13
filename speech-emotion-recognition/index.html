@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emotion Recognition from Speech · Dashboard</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<style>
+:root{--bg:#0b1020;--card:#151c33;--ink:#e8ecf8;--muted:#8b95b5;--a:#22d3ee;--b:#a855f7;--line:#243056}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);padding:20px;min-height:100vh;background:radial-gradient(900px 420px at 100% -10%,rgba(236,72,153,.15),transparent),radial-gradient(900px 420px at 0 0,rgba(34,211,238,.15),transparent),var(--bg)}
+header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px}
+h1{margin:0;font-size:22px;background:linear-gradient(90deg,var(--a),var(--b),#f472b6);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--muted);font-size:13px}
+.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;min-width:0;transition:box-shadow .2s;animation:up .5s ease backwards}
+.card:hover{box-shadow:0 10px 30px rgba(168,85,247,.14)}
+h2{font-size:14px;margin:0 0 10px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.kpi{border-radius:14px;padding:14px;color:#fff;background:linear-gradient(135deg,#0ea5e9,#6366f1);animation:up .5s ease backwards}
+.kpi:nth-child(2){background:linear-gradient(135deg,#ec4899,#a855f7)}
+.kpi:nth-child(3){background:linear-gradient(135deg,#10b981,#06b6d4)}
+.kpi:nth-child(4){background:linear-gradient(135deg,#f59e0b,#ef4444)}
+.kpi .v{font-size:24px;font-weight:800}
+.kpi .l{font-size:12px;opacity:.85}
+button{background:linear-gradient(135deg,var(--a),var(--b));color:#06101f;border:0;border-radius:10px;padding:10px 16px;font-weight:700;cursor:pointer;transition:transform .15s,filter .15s;font-size:13px}
+button:hover{transform:translateY(-1px);filter:brightness(1.1)}
+button:active{transform:scale(.97)}
+button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden;flex:1}
+.bar>div{height:100%;transition:width .3s}
+canvas{width:100%;display:block;background:#0a0f1e;border-radius:12px;border:1px solid var(--line)}
+.emo{font-size:46px;font-weight:900;text-align:center;line-height:1.1;animation:pop .35s ease}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.tile{background:var(--bg);border:1px solid var(--line);border-radius:10px;text-align:center;padding:8px;font-size:11px;color:var(--muted);animation:up .4s ease backwards}
+.tile b{display:block;font-size:16px;color:var(--a)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:5px;border-bottom:1px solid var(--line);text-align:left}
+.cm td{text-align:center}
+.scroll{overflow:auto}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#22c55e;margin-right:6px;animation:pulse 1.6s infinite}
+.live{display:inline-flex;align-items:center;font-size:11px;font-weight:700;letter-spacing:.08em;color:#4ade80;background:#052e16;padding:4px 10px;border-radius:999px}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
+.brand{display:flex;align-items:center;gap:12px}
+.brand svg{flex:none;filter:drop-shadow(0 4px 12px rgba(168,85,247,.35))}
+.err{background:#3f1d1d;color:#fecaca;border:1px solid #7f1d1d;border-radius:10px;padding:10px 12px;font-size:13px;margin-top:10px;line-height:1.5}
+.fileBtn{font-size:13px;color:var(--a);cursor:pointer}
+@keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes pop{from{transform:scale(.85);opacity:.4}to{transform:none;opacity:1}}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.7)}70%{box-shadow:0 0 0 8px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div class="brand">
+      <svg width="44" height="44" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#lg)"/><g stroke="#06101f" stroke-width="5" stroke-linecap="round"><line x1="14" y1="28" x2="14" y2="36"/><line x1="23" y1="20" x2="23" y2="44"/><line x1="32" y1="12" x2="32" y2="52"/><line x1="41" y1="22" x2="41" y2="42"/><line x1="50" y1="30" x2="50" y2="34"/></g></svg>
+      <h1>Emotion Recognition from Speech</h1>
+    </div>
+    <div class="sub">MFCC and spectral features · neural network (TensorFlow.js) · live microphone input</div>
+  </div>
+  <div class="row"><span class="live"><span class="dot"></span>REAL-TIME</span></div>
+</header>
+
+<div class="kpis">
+  <div class="kpi"><div class="l">Frames analysed</div><div class="v" id="kF">0</div></div>
+  <div class="kpi"><div class="l">Current emotion</div><div class="v" id="kEm">–</div></div>
+  <div class="kpi"><div class="l">Confidence</div><div class="v" id="kConf">–</div></div>
+  <div class="kpi"><div class="l">Synthetic test accuracy</div><div class="v" id="kAcc">–</div></div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Microphone</h2>
+    <div class="row" style="margin-bottom:10px">
+      <button id="mic" disabled>Training model…</button>
+      <span class="sub" id="state">Preparing…</span>
+    </div>
+    <canvas id="wave" width="600" height="150"></canvas>
+    <div class="row" style="margin-top:12px"><span class="sub">No microphone or permission? Analyse an audio file:</span></div>
+    <input type="file" id="file" accept="audio/*" class="fileBtn" style="margin-top:6px">
+    <div id="err" class="err" hidden></div>
+  </div>
+
+  <div class="card">
+    <h2>Live emotion</h2>
+    <div class="emo" id="emo">–</div>
+    <div id="probs" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <h2>Emotion timeline (last 24 s)</h2>
+    <canvas id="tl" width="600" height="180"></canvas>
+    <div class="row" style="margin-top:8px;font-size:12px" id="legend"></div>
+  </div>
+
+  <div class="card">
+    <h2>Acoustic features (live)</h2>
+    <div class="tiles" id="feat"></div>
+    <div class="note">Features are extracted each 200 ms from the microphone signal. Pitch is estimated by autocorrelation; MFCC-style values come from a 20-band mel filterbank and a DCT.</div>
+  </div>
+
+  <div class="card">
+    <h2>Recent detections</h2>
+    <div class="tiles" id="log"></div>
+  </div>
+
+  <div class="card">
+    <h2>Model evaluation (synthetic test split)</h2>
+    <div class="scroll"><table id="met"></table></div>
+    <h2 style="margin-top:14px">Confusion matrix (rows = actual, columns = predicted)</h2>
+    <div class="scroll"><table class="cm" id="cm"></table></div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:16px">Important: the classifier is trained on synthetic feature distributions that approximate typical emotional speech (for example, anger has high energy and pitch; sadness is quiet and low). It has not been trained on real recordings such as RAVDESS, TESS, or EMO-DB, and microphone features are not calibrated to those datasets. Treat live predictions as a demonstration of the pipeline, not a reliable emotion detector. Accuracy will be much lower on real speech, and no model reaches 100%.</p>
+
+<script>
+const EM=['Neutral','Happy','Angry','Sad','Fearful'];
+const COL=['#94a3b8','#facc15','#ef4444','#3b82f6','#a855f7'];
+const ICON=['😐','😄','😠','😢','😨'];
+// Approximate class centers in raw feature units: rms, zcr, pitch(Hz), centroid(Hz), mfcc1..5
+const MEAN=[
+  [.05,.07,140,1100,40,-5,8,-3,2],
+  [.09,.11,220,1800,50,-3,10,-2,3],
+  [.14,.13,190,2100,60,0,12,-4,4],
+  [.03,.04,110,800,30,-8,4,0,1],
+  [.08,.16,250,1600,45,4,14,-1,5]
+];
+const SD=[.02,.03,30,300,10,10,10,10,10];
+const FN=['RMS energy','Zero-crossing','Pitch (Hz)','Centroid (Hz)','MFCC 1','MFCC 2','MFCC 3','MFCC 4','MFCC 5'];
+const $=id=>document.getElementById(id);
+const pct=v=>(v*100).toFixed(1)+'%';
+
+let seedR=7;
+const rr=()=>{seedR=(seedR*16807)%2147483647;return seedR/2147483647;};
+const gz=()=>Math.sqrt(-2*Math.log(rr()+1e-9))*Math.cos(2*Math.PI*rr());
+const synth=c=>MEAN[c].map((m,j)=>m+SD[j]*gz());
+
+let model=null,mu=null,sg=null,testRes=null;
+let ac=null,an=null,mediaStream=null,running=false,timerId=null;
+let buf=new Float32Array(2048),fq=new Float32Array(1024),bandIdx=null;
+let smooth=[],probHist=[],logs=[],frames=0,dom=0,lastProbs=null;
+
+async function train(){
+  const Xtr=[],Ytr=[],Xte=[],Yte=[];
+  EM.forEach((_,c)=>{
+    for(let k=0;k<300;k++){
+      const f=synth(c);
+      if(k<240){Xtr.push(f);Ytr.push(c);}else{Xte.push(f);Yte.push(c);}
+    }
+  });
+  mu=Xtr[0].map((_,j)=>Xtr.reduce((s,r)=>s+r[j],0)/Xtr.length);
+  sg=mu.map((_,j)=>Math.sqrt(Xtr.reduce((s,r)=>s+(r[j]-mu[j])**2,0)/Xtr.length)||1);
+  const norm=r=>r.map((v,j)=>(v-mu[j])/sg[j]);
+  const xt=tf.tensor2d(Xtr.map(norm)),yt=tf.oneHot(tf.tensor1d(Ytr,'int32'),EM.length).toFloat();
+  model=tf.sequential();
+  model.add(tf.layers.dense({inputShape:[FN.length],units:32,activation:'relu'}));
+  model.add(tf.layers.dropout({rate:0.2}));
+  model.add(tf.layers.dense({units:EM.length,activation:'softmax'}));
+  model.compile({optimizer:tf.train.adam(0.01),loss:'categoricalCrossentropy',metrics:['accuracy']});
+  await model.fit(xt,yt,{epochs:40,batchSize:32,shuffle:true});
+  const pr=Array.from(model.predict(tf.tensor2d(Xte.map(norm))).argMax(-1).dataSync());
+  const cm=EM.map(()=>Array(EM.length).fill(0));
+  Yte.forEach((t,i)=>cm[t][pr[i]]++);
+  testRes={cm,acc:Yte.filter((t,i)=>t===pr[i]).length/Yte.length};
+  xt.dispose();yt.dispose();
+  renderEval();
+  $('kAcc').textContent=pct(testRes.acc);
+  $('mic').disabled=false;
+  $('mic').textContent='▶ Start microphone';
+  $('state').textContent='Model ready · click Start and speak';
+}
+
+function renderEval(){
+  const {cm}=testRes;
+  const rows=EM.map((e,c)=>{
+    const tp=cm[c][c];let fp=0,fn=0;
+    for(let k=0;k<EM.length;k++)if(k!==c){fp+=cm[k][c];fn+=cm[c][k];}
+    const p=tp/(tp+fp)||0,r=tp/(tp+fn)||0;
+    return {e,c,p,r,f:(p+r)?2*p*r/(p+r):0};
+  });
+  $('met').innerHTML='<tr><th>Emotion</th><th>Precision</th><th>Recall</th><th>F1</th></tr>'+
+    rows.map(o=>`<tr><td style="color:${COL[o.c]}"><b>${o.e}</b></td><td>${pct(o.p)}</td><td>${pct(o.r)}</td><td>${o.f.toFixed(2)}</td></tr>`).join('');
+  const max=Math.max(...cm.flat(),1);
+  $('cm').innerHTML='<tr><th></th>'+EM.map(e=>`<th>${e.slice(0,4)}</th>`).join('')+'</tr>'+
+    cm.map((row,i)=>`<tr><th>${EM[i].slice(0,4)}</th>`+row.map(v=>
+      `<td style="background:rgba(34,211,238,${(v/max*0.8).toFixed(2)})">${v}</td>`).join('')+'</tr>').join('');
+  $('legend').innerHTML=EM.map((e,c)=>`<span style="color:${COL[c]}">● ${e}</span>`).join('');
+}
+
+function bandsSetup(sr){
+  bandIdx=new Int16Array(1024).fill(-1);
+  const mel=f=>2595*Math.log10(1+f/700),lo=mel(100),hi=mel(4000),B=20;
+  for(let i=1;i<1024;i++){
+    const f=i*sr/2048;
+    if(f<100||f>4000)continue;
+    bandIdx[i]=Math.min(B-1,Math.floor((mel(f)-lo)/(hi-lo)*B));
+  }
+}
+
+function features(){
+  const sr=ac.sampleRate;
+  an.getFloatTimeDomainData(buf);
+  an.getFloatFrequencyData(fq);
+  let e=0,zc=0;
+  for(let i=0;i<buf.length;i++){
+    e+=buf[i]*buf[i];
+    if(i&&(buf[i]>=0)!==(buf[i-1]>=0))zc++;
+  }
+  const rms=Math.sqrt(e/buf.length),zcr=zc/buf.length;
+  let best=0,bl=0;
+  for(let L=Math.floor(sr/400);L<=Math.floor(sr/70);L++){
+    let s=0;
+    for(let i=0;i+L<buf.length;i++)s+=buf[i]*buf[i+L];
+    s/=(e||1);
+    if(s>best){best=s;bl=L;}
+  }
+  const pitch=(rms>0.01&&best>0.3&&bl)?sr/bl:0;
+  let P=0,FP=0;const bandE=Array(20).fill(0);
+  for(let i=1;i<fq.length;i++){
+    const p=Math.pow(10,fq[i]/10),f=i*sr/2048;
+    P+=p;FP+=f*p;
+    if(bandIdx[i]>=0)bandE[bandIdx[i]]+=p;
+  }
+  const centroid=P?FP/P:0;
+  const logE=bandE.map(v=>Math.log(v+1e-10));
+  const mf=[1,2,3,4,5].map(k=>logE.reduce((s,v,b)=>s+v*Math.cos(Math.PI*k*(b+0.5)/20),0));
+  return [rms,zcr,pitch,centroid,...mf];
+}
+
+function tick(){
+  const f=features();
+  lastProbs=f;
+  if(f[0]<0.008){
+    $('state').textContent='Listening… (silence detected)';
+    return;
+  }
+  const x=f.map((v,j)=>(v-mu[j])/sg[j]);
+  const inp=tf.tensor2d([x]);
+  const out=model.predict(inp);
+  const p=Array.from(out.dataSync());
+  inp.dispose();out.dispose();
+  smooth.push(p);if(smooth.length>5)smooth.shift();
+  const avg=EM.map((_,c)=>smooth.reduce((s,q)=>s+q[c],0)/smooth.length);
+  dom=avg.indexOf(Math.max(...avg));
+  probHist.push(avg);if(probHist.length>120)probHist.shift();
+  frames++;
+  logs.unshift({e:EM[dom],c:COL[dom],t:new Date().toLocaleTimeString()});
+  logs=logs.slice(0,12);
+  render(avg,f);
+}
+
+function render(avg,f){
+  $('kF').textContent=frames;
+  $('kEm').textContent=ICON[dom]+' '+EM[dom];
+  $('kEm').style.color=COL[dom];
+  $('kConf').textContent=pct(avg[dom]);
+  $('emo').textContent=ICON[dom]+' '+EM[dom];
+  $('emo').style.color=COL[dom];
+  $('state').textContent='Analysing live audio';
+  $('probs').innerHTML=EM.map((e,c)=>
+    `<div class="row" style="font-size:13px;margin:7px 0"><span style="width:96px">${ICON[c]} ${e}</span>
+     <div class="bar"><div style="width:${avg[c]*100}%;background:${COL[c]}"></div></div>
+     <span style="width:52px;text-align:right">${pct(avg[c])}</span></div>`).join('');
+  $('feat').innerHTML=FN.map((n,j)=>`<div class="tile"><b>${f[j].toFixed(3)}</b>${n}</div>`).join('');
+  $('log').innerHTML=logs.map(l=>`<div class="tile"><b style="color:${l.c}">${l.e}</b>${l.t}</div>`).join('');
+}
+
+function draw(){
+  requestAnimationFrame(draw);
+  const w=$('wave'),g=w.getContext('2d');
+  g.clearRect(0,0,w.width,w.height);
+  if(an){
+    an.getFloatTimeDomainData(buf);
+    g.strokeStyle='#22d3ee';g.lineWidth=2;g.beginPath();
+    buf.forEach((v,i)=>{
+      const x=i/buf.length*w.width,y=w.height/2+v*w.height/2;
+      i?g.lineTo(x,y):g.moveTo(x,y);
+    });
+    g.stroke();
+  }
+  const t=$('tl'),h=t.getContext('2d');
+  h.clearRect(0,0,t.width,t.height);
+  EM.forEach((_,k)=>{
+    h.strokeStyle=COL[k];h.lineWidth=2;h.beginPath();
+    probHist.forEach((p,i)=>{
+      const x=i/120*t.width,y=t.height-p[k]*t.height;
+      i?h.lineTo(x,y):h.moveTo(x,y);
+    });
+    h.stroke();
+  });
+}
+
+async function toggleMic(){
+  if(running){stopMic();return;}
+  try{
+    mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    ac=new (window.AudioContext||window.webkitAudioContext)();
+    an=ac.createAnalyser();
+    an.fftSize=2048;
+    ac.createMediaStreamSource(mediaStream).connect(an);
+    bandsSetup(ac.sampleRate);
+    running=true;smooth=[];probHist=[];logs=[];frames=0;
+    timerId=setInterval(tick,200);
+    $('mic').textContent='■ Stop microphone';
+    showErr('');
+    $('state').textContent='Listening…';
+  }catch(err){
+    showErr(micError(err));
+    $('state').textContent='Microphone not active';
+  }
+}
+
+let curAudio=null;
+function stopMic(){
+  if(curAudio){curAudio.pause();curAudio=null;}
+  running=false;
+  clearInterval(timerId);
+  if(mediaStream)mediaStream.getTracks().forEach(t=>t.stop());
+  if(ac)ac.close();
+  ac=null;an=null;
+  $('mic').textContent='▶ Start microphone';
+  $('state').textContent='Stopped';
+}
+
+function micError(err){
+  if(!window.isSecureContext)return 'The microphone needs a secure page (HTTPS or localhost).';
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)return 'This browser does not support microphone access. Use the audio-file option below.';
+  if(err.name==='NotAllowedError')return 'Microphone permission was denied. Click the site-settings icon in the address bar, set Microphone to Allow, reload the page, and press Start again. If you are viewing this inside an embedded preview, open the page in its own browser tab.';
+  if(err.name==='NotFoundError')return 'No microphone was found. Connect one, or analyse an audio file below.';
+  if(err.name==='NotReadableError')return 'The microphone is in use by another application. Close it and try again.';
+  return 'Microphone error: '+err.message;
+}
+function showErr(m){const e=$('err');e.textContent=m;e.hidden=!m;}
+
+function useFile(file){
+  if(!file)return;
+  if(running)stopMic();
+  showErr('');
+  const audio=new Audio(URL.createObjectURL(file));
+  curAudio=audio;
+  ac=new (window.AudioContext||window.webkitAudioContext)();
+  an=ac.createAnalyser();an.fftSize=2048;
+  const src=ac.createMediaElementSource(audio);
+  src.connect(an);an.connect(ac.destination);
+  bandsSetup(ac.sampleRate);
+  audio.onended=()=>{stopMic();$('state').textContent='File finished';};
+  audio.play().then(()=>{
+    running=true;smooth=[];probHist=[];logs=[];frames=0;
+    timerId=setInterval(tick,200);
+    $('mic').textContent='■ Stop';
+    $('state').textContent='Analysing file: '+file.name;
+  }).catch(e=>showErr('Could not play this file: '+e.message));
+}
+
+$('mic').onclick=toggleMic;
+$('file').onchange=e=>useFile(e.target.files[0]);
+$('feat').innerHTML=FN.map(n=>`<div class="tile"><b>–</b>${n}</div>`).join('');
+requestAnimationFrame(draw);
+train();
+</script>
+</body>
+</html>
