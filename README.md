@@ -1,44 +1,44 @@
 # Emotion Recognition from Speech
 
-A real-time speech emotion dashboard. It extracts acoustic features (RMS energy, zero-crossing rate, pitch, spectral centroid and MFCC-style coefficients) from the microphone or an audio file, then classifies them as Neutral, Happy, Angry, Sad or Fearful with a neural network built in TensorFlow.js.
+A speech emotion dashboard. Upload any audio file (MP3, WAV, OGG, M4A, FLAC) or use the microphone. The app extracts acoustic features (RMS energy, zero-crossing rate, pitch, spectral centroid, MFCC-style coefficients) and classifies them as Neutral, Happy, Angry, Sad or Fearful with a neural network running in TensorFlow.js.
 
 ## Run it
 
-No build step is needed. The page must be served over HTTPS or localhost for the microphone to work.
+Serve over HTTPS (GitHub Pages) or localhost. Microphone access does not work in embedded previews, so open the page in its own tab.
 
-1. Clone or download this repository.
-2. Open the GitHub Pages link (see below), or run `python -m http.server 8000` and visit `http://localhost:8000`.
-3. Click **Start microphone** and allow access when the browser asks.
+- GitHub Pages: Settings → Pages → Deploy from a branch → `main` / root.
+- Local: `python -m http.server 8000`, then open `http://localhost:8000`.
 
-## Fixing "microphone permission denied"
+## Microphone permission
 
-- Click the site-settings icon (lock or tune icon) in the address bar, set **Microphone** to **Allow**, reload, and press Start again.
-- On Windows, check **Settings → Privacy & security → Microphone** and make sure both "Microphone access" and "Let apps access your microphone" are on.
-- Embedded previews (for example, inside a chat window or an iframe) often block microphone access. Open the page in its own browser tab.
-- If no microphone is available, use **Analyse an audio file** to upload a WAV or MP3 recording.
+Click the site-settings icon in the address bar, set Microphone to Allow, reload, and press Start again. On Windows, check Settings → Privacy & security → Microphone.
 
-## Enable GitHub Pages
+## Train the model on RAVDESS and TESS
 
-1. Push this folder to the root of a public repository.
-2. Go to **Settings → Pages**, choose **Deploy from a branch**, select `main` and `/ (root)`, then save.
-3. The site appears at `https://<your-username>.github.io/<repo-name>/`.
+Datasets are not stored in this repository. Download them into a local `data/` folder.
 
-## How it works
+1. Download **RAVDESS** (Audio_Speech_Actors_01-24.zip) from Zenodo: search "RAVDESS Zenodo".
+2. Download **TESS** from Kaggle: search "Toronto emotional speech set (TESS)".
+3. Extract both into `data/`. You should have:
+   ```
+   data/Audio_Speech_Actors_01-24/Actor_01 ... Actor_24
+   data/TESS Toronto emotional speech set data/OAF_angry ... YAF_sad
+   ```
+4. From the `training/` folder:
+   ```bash
+   pip install -r requirements.txt
+   python train.py --ravdess ../data/Audio_Speech_Actors_01-24 --tess "../data/TESS Toronto emotional speech set data"
+   ```
+   Either flag can be dropped to train on one dataset only.
+5. Commit the generated `models/emotion/` folder. The page loads it automatically and shows the held-out accuracy.
 
-1. The Web Audio API analyses 2048-sample frames every 200 ms.
-2. Features are computed: RMS energy, zero-crossing rate, pitch via autocorrelation (70–400 Hz), spectral centroid, and five MFCC-style coefficients from a 20-band mel filterbank and DCT.
-3. Features are standardized and passed to a 2-layer neural network (32 hidden ReLU units, softmax over five emotions).
-4. Predictions are smoothed over the last five frames to reduce flicker.
+Held-out speakers are never used for training: RAVDESS actors 21–24 and TESS speaker YAF. The script reports accuracy for each dataset separately, so the numbers reflect speakers the model has not heard.
 
 ## Limitations
 
-- The classifier is trained on **synthetic** feature distributions that approximate emotional speech. It has not been trained on real recordings such as RAVDESS, TESS or EMO-DB, so live predictions are a demonstration of the pipeline, not a reliable emotion detector.
-- Microphone features are not calibrated against real speech.
-- No model reaches 100% accuracy. Real speech emotion recognition typically reaches 70–85% with models trained on the proper datasets.
-
-## Next steps
-
-Train a CNN or LSTM on RAVDESS or TESS in Python (using `librosa` for MFCC extraction), export the model to TensorFlow.js, and load it in `index.html` in place of the synthetic classifier.
+- No model reaches 100% on speech emotion. Accuracy varies by speaker, language, and recording quality.
+- The 9-feature model is deliberately simple. Higher accuracy would need richer features (full MFCC sequences) and a CNN or LSTM.
+- TESS contains only two speakers, both female, so the model may generalise less well to men and children.
 
 ## License
 

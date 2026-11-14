@@ -1,15 +1,19 @@
 """
-Train the speech-emotion model on RAVDESS and export it for the web page.
+Train the speech-emotion model on RAVDESS and/or TESS and export it for the web page.
 
-Usage:
+Usage (either dataset can be omitted, but at least one is needed):
     pip install -r requirements.txt
-    python train.py path/to/Audio_Speech_Actors_01-24
+    python train.py --ravdess ../data/Audio_Speech_Actors_01-24 --tess "../data/TESS Toronto emotional speech set data"
+
+Held-out speakers (never used for training, reported separately):
+  - RAVDESS actors 21-24
+  - TESS speaker YAF (TESS has two speakers: OAF and YAF)
 
 Writes ../models/emotion/ (model.json, weight shards, norm.json).
 Features are computed exactly as in index.html (featuresFromFrame),
 so the browser sees the same numbers the model was trained on.
 """
-import glob, json, os, sys
+import argparse, glob, json, os
 import numpy as np
 import soundfile as sf
 import tensorflow as tf
@@ -17,8 +21,8 @@ from tensorflowjs.converters import save_keras_model
 from sklearn.metrics import confusion_matrix
 
 EM = ['Neutral', 'Happy', 'Angry', 'Sad', 'Fearful']
-# RAVDESS emotion codes -> our labels (calm merges into Neutral; others are dropped)
-CODE = {'01': 0, '02': 0, '03': 1, '04': 3, '05': 2, '06': 4}
+RAVDESS_CODE = {'01': 0, '02': 0, '03': 1, '04': 3, '05': 2, '06': 4}  # calm -> Neutral
+TESS_CODE = {'neutral': 0, 'happy': 1, 'angry': 2, 'sad': 3, 'fear': 4}  # disgust, ps dropped
 N = 2048
 W = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(N) / N)   # periodic Hann, same as JS
 
@@ -58,64 +62,97 @@ def feats(x, sr, idx):
     mf = [float(np.sum(logE * np.cos(np.pi * k * (b + 0.5) / 20))) for k in range(1, 6)]
     return [rms, zcr, float(pitch), float(centroid)] + mf
 
-def load(root):
-    X, y, actors = [], [], []
-    idx_cache = {}
+def frames_from(path, idx_cache):
+    x, sr = sf.read(path, dtype='float32')
+    if x.ndim > 1:
+        x = x.mean(axis=1)
+    if sr not in idx_cache:
+        idx_cache[sr] = band_index(sr)
+    out = []
+    for i in range(0, len(x) - N + 1, N):
+        f = feats(x[i:i + N], sr, idx_cache[sr])
+        if f[0] >= 0.008:      # skip silence, same threshold as the web page
+            out.append(f)
+    return out
+
+def load_ravdess(root, idx_cache, rows):
     for path in sorted(glob.glob(os.path.join(root, 'Actor_*', '*.wav'))):
         parts = os.path.basename(path)[:-4].split('-')
-        code = parts[2]
-        if code not in CODE:
+        if parts[2] not in RAVDESS_CODE:
             continue
-        x, sr = sf.read(path, dtype='float32')
-        if x.ndim > 1:
-            x = x.mean(axis=1)
-        if sr not in idx_cache:
-            idx_cache[sr] = band_index(sr)
         actor = int(parts[6])
-        for i in range(0, len(x) - N + 1, N):
-            f = feats(x[i:i + N], sr, idx_cache[sr])
-            if f[0] < 0.008:
-                continue
-            X.append(f)
-            y.append(CODE[code])
-            actors.append(actor)
-    return np.array(X), np.array(y), np.array(actors)
+        for f in frames_from(path, idx_cache):
+            rows.append((f, RAVDESS_CODE[parts[2]], actor >= 21, 'RAVDESS'))
 
-def main(root):
-    X, y, actors = load(root)
-    print(f'Loaded {len(X)} voiced frames from {len(set(actors))} speakers')
-    test = actors >= 21          # speaker-independent split: actors 21-24 held out
-    train = ~test
-    mu = X[train].mean(0)
-    sg = X[train].std(0) + 1e-8
-    Xn = (X - mu) / sg
+def load_tess(root, idx_cache, rows):
+    for path in sorted(glob.glob(os.path.join(root, '**', '*.wav'), recursive=True)):
+        name = os.path.basename(path)[:-4].split('_')
+        emo = name[-1].lower()
+        if emo not in TESS_CODE:
+            continue
+        held_out = name[0].upper() == 'YAF'
+        for f in frames_from(path, idx_cache):
+            rows.append((f, TESS_CODE[emo], held_out, 'TESS'))
 
-    model = tf.keras.Sequential([
+def build_model():
+    m = tf.keras.Sequential([
         tf.keras.layers.Input((9,)),
         tf.keras.layers.Dense(64, activation='relu'),
         tf.keras.layers.Dropout(0.3),
         tf.keras.layers.Dense(32, activation='relu'),
         tf.keras.layers.Dense(len(EM), activation='softmax'),
     ])
-    model.compile(optimizer=tf.keras.optimizers.Adam(1e-3),
-                  loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    model.fit(Xn[train], y[train], validation_data=(Xn[test], y[test]),
+    m.compile(optimizer=tf.keras.optimizers.Adam(1e-3),
+              loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    return m
+
+def main(args):
+    rows, idx_cache = [], {}
+    if args.ravdess:
+        load_ravdess(args.ravdess, idx_cache, rows)
+    if args.tess:
+        load_tess(args.tess, idx_cache, rows)
+    if not rows:
+        raise SystemExit('No audio found. Check the --ravdess and --tess folder paths.')
+
+    X = np.array([r[0] for r in rows], dtype=np.float32)
+    Y = np.array([r[1] for r in rows])
+    T = np.array([r[2] for r in rows])
+    S = np.array([r[3] for r in rows])
+    for src in sorted(set(S)):
+        print(f'{src}: {int((S == src).sum())} voiced frames')
+    if T.sum() == 0 or (~T).sum() == 0:
+        raise SystemExit('Need both training and held-out speakers. Use both datasets.')
+
+    train = ~T
+    mu = X[train].mean(0)
+    sg = X[train].std(0) + 1e-8
+    Xn = (X - mu) / sg
+
+    model = build_model()
+    model.fit(Xn[train], Y[train], validation_data=(Xn[T], Y[T]),
               epochs=60, batch_size=128, verbose=2,
               callbacks=[tf.keras.callbacks.EarlyStopping(patience=6, restore_best_weights=True)])
 
-    pred = model.predict(Xn[test], verbose=0).argmax(1)
-    acc = float((pred == y[test]).mean())
-    print('Held-out speaker accuracy (frame level):', round(acc, 4))
-    print(confusion_matrix(y[test], pred, labels=range(len(EM))))
+    pred = model.predict(Xn[T], verbose=0).argmax(1)
+    acc = float((pred == Y[T]).mean())
+    print('Held-out speaker accuracy (all sources, frame level):', round(acc, 4))
+    for src in sorted(set(S[T])):
+        m = S[T] == src
+        print(f'  {src} held-out accuracy: {(pred[m] == Y[T][m]).mean():.4f}')
+    print('Confusion matrix (rows = actual, cols = predicted):')
+    print(confusion_matrix(Y[T], pred, labels=range(len(EM))))
 
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models', 'emotion')
     os.makedirs(out, exist_ok=True)
     save_keras_model(model, out)
     with open(os.path.join(out, 'norm.json'), 'w') as fh:
-        json.dump({'mu': mu.tolist(), 'sg': sg.tolist(), 'test_acc': acc, 'labels': EM}, fh)
+        json.dump({'mu': mu.tolist(), 'sg': sg.tolist(), 'test_acc': acc,
+                   'labels': EM, 'sources': sorted(set(S))}, fh)
     print('Saved model to', os.path.abspath(out))
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        sys.exit('Usage: python train.py <RAVDESS root folder>')
-    main(sys.argv[1])
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--ravdess', help='RAVDESS folder containing Actor_01 ... Actor_24')
+    ap.add_argument('--tess', help='TESS folder containing OAF_* and YAF_* subfolders')
+    main(ap.parse_args())

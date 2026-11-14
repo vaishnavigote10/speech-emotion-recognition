@@ -68,7 +68,7 @@ th,td{padding:5px;border-bottom:1px solid var(--line);text-align:left}
   <div class="kpi"><div class="l">Frames analysed</div><div class="v" id="kF">0</div></div>
   <div class="kpi"><div class="l">Current emotion</div><div class="v" id="kEm">–</div></div>
   <div class="kpi"><div class="l">Confidence</div><div class="v" id="kConf">–</div></div>
-  <div class="kpi"><div class="l">Synthetic test accuracy</div><div class="v" id="kAcc">–</div></div>
+  <div class="kpi"><div class="l">Test accuracy</div><div class="v" id="kAcc">–</div></div>
 </div>
 
 <div class="grid">
@@ -108,14 +108,14 @@ th,td{padding:5px;border-bottom:1px solid var(--line);text-align:left}
   </div>
 
   <div class="card">
-    <h2>Model evaluation (synthetic test split)</h2>
+    <h2>Model evaluation (test split)</h2>
     <div class="scroll"><table id="met"></table></div>
     <h2 style="margin-top:14px">Confusion matrix (rows = actual, columns = predicted)</h2>
     <div class="scroll"><table class="cm" id="cm"></table></div>
   </div>
 </div>
 
-<p class="note" style="margin-top:16px">Important: the classifier is trained on synthetic feature distributions that approximate typical emotional speech (for example, anger has high energy and pitch; sadness is quiet and low). It has not been trained on real recordings such as RAVDESS, TESS, or EMO-DB, and microphone features are not calibrated to those datasets. Treat live predictions as a demonstration of the pipeline, not a reliable emotion detector. Accuracy will be much lower on real speech, and no model reaches 100%.</p>
+<p class="note" style="margin-top:16px">Model: if <code>models/emotion/</code> is present (trained on real RAVDESS and TESS recordings with <code>training/train.py</code>), the page uses it. Otherwise it falls back to a synthetic demo model whose accuracy is not meaningful. Speech emotion recognition is hard, so no model reaches 100%; the test accuracy shown is measured on held-out speakers.</p>
 
 <script>
 const EM=['Neutral','Happy','Angry','Sad','Fearful'];
@@ -201,34 +201,77 @@ function bandsSetup(sr){
   }
 }
 
-function features(){
-  const sr=ac.sampleRate;
-  an.getFloatTimeDomainData(buf);
-  an.getFloatFrequencyData(fq);
-  let e=0,zc=0;
-  for(let i=0;i<buf.length;i++){
-    e+=buf[i]*buf[i];
-    if(i&&(buf[i]>=0)!==(buf[i-1]>=0))zc++;
+// ---- Shared feature extraction (mirrors training/train.py exactly) ----
+const NFFT=2048;
+const HANN=new Float32Array(NFFT).map((_,n)=>0.5-0.5*Math.cos(2*Math.PI*n/NFFT));
+const bandCache={};
+function bandIndex(sr){
+  if(bandCache[sr])return bandCache[sr];
+  const mel=f=>2595*Math.log10(1+f/700),lo=mel(100),hi=mel(4000);
+  const idx=new Int16Array(NFFT/2).fill(-1);
+  for(let k=1;k<NFFT/2;k++){
+    const f=k*sr/NFFT;
+    if(f<100||f>4000)continue;
+    idx[k]=Math.min(19,Math.floor((mel(f)-lo)/(hi-lo)*20));
   }
-  const rms=Math.sqrt(e/buf.length),zcr=zc/buf.length;
+  bandCache[sr]=idx;
+  return idx;
+}
+function fft(re,im){
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;
+    for(;j&bit;bit>>=1)j^=bit;
+    j^=bit;
+    if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}
+  }
+  for(let len=2;len<=n;len<<=1){
+    const ang=-2*Math.PI/len,wr=Math.cos(ang),wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){
+      let cr=1,ci=0;
+      for(let j=0;j<len/2;j++){
+        const a=i+j,b=a+len/2;
+        const xr=re[b]*cr-im[b]*ci,xi=re[b]*ci+im[b]*cr;
+        re[b]=re[a]-xr;im[b]=im[a]-xi;
+        re[a]+=xr;im[a]+=xi;
+        const t=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=t;
+      }
+    }
+  }
+}
+function featuresFromFrame(x,sr){
+  const N=NFFT;let e=0,zc=0;
+  for(let i=0;i<N;i++){
+    e+=x[i]*x[i];
+    if(i&&(x[i]>=0)!==(x[i-1]>=0))zc++;
+  }
+  const rms=Math.sqrt(e/N),zcr=zc/N;
   let best=0,bl=0;
   for(let L=Math.floor(sr/400);L<=Math.floor(sr/70);L++){
     let s=0;
-    for(let i=0;i+L<buf.length;i++)s+=buf[i]*buf[i+L];
+    for(let i=0;i+L<N;i++)s+=x[i]*x[i+L];
     s/=(e||1);
     if(s>best){best=s;bl=L;}
   }
   const pitch=(rms>0.01&&best>0.3&&bl)?sr/bl:0;
-  let P=0,FP=0;const bandE=Array(20).fill(0);
-  for(let i=1;i<fq.length;i++){
-    const p=Math.pow(10,fq[i]/10),f=i*sr/2048;
+  const re=new Float64Array(N),im=new Float64Array(N);
+  for(let i=0;i<N;i++)re[i]=x[i]*HANN[i];
+  fft(re,im);
+  const idx=bandIndex(sr),E=Array(20).fill(0);
+  let P=0,FP=0;
+  for(let k=1;k<N/2;k++){
+    const p=re[k]*re[k]+im[k]*im[k],f=k*sr/N;
     P+=p;FP+=f*p;
-    if(bandIdx[i]>=0)bandE[bandIdx[i]]+=p;
+    if(idx[k]>=0)E[idx[k]]+=p;
   }
   const centroid=P?FP/P:0;
-  const logE=bandE.map(v=>Math.log(v+1e-10));
+  const logE=E.map(v=>Math.log(v+1e-10));
   const mf=[1,2,3,4,5].map(k=>logE.reduce((s,v,b)=>s+v*Math.cos(Math.PI*k*(b+0.5)/20),0));
   return [rms,zcr,pitch,centroid,...mf];
+}
+function features(){
+  an.getFloatTimeDomainData(buf);
+  return featuresFromFrame(buf,ac.sampleRate);
 }
 
 function tick(){
@@ -287,7 +330,7 @@ function draw(){
   EM.forEach((_,k)=>{
     h.strokeStyle=COL[k];h.lineWidth=2;h.beginPath();
     probHist.forEach((p,i)=>{
-      const x=i/120*t.width,y=t.height-p[k]*t.height;
+      const x=i/Math.max(1,probHist.length-1)*t.width,y=t.height-p[k]*t.height;
       i?h.lineTo(x,y):h.moveTo(x,y);
     });
     h.stroke();
@@ -336,31 +379,77 @@ function micError(err){
 }
 function showErr(m){const e=$('err');e.textContent=m;e.hidden=!m;}
 
-function useFile(file){
+function predictBatch(F){
+  const X=F.map(f=>f.map((v,j)=>(v-mu[j])/sg[j]));
+  const inp=tf.tensor2d(X);
+  const out=model.predict(inp);
+  const P=out.arraySync();
+  inp.dispose();out.dispose();
+  return P;
+}
+
+async function useFile(file){
   if(!file)return;
   if(running)stopMic();
   showErr('');
-  const audio=new Audio(URL.createObjectURL(file));
-  curAudio=audio;
-  ac=new (window.AudioContext||window.webkitAudioContext)();
-  an=ac.createAnalyser();an.fftSize=2048;
-  const src=ac.createMediaElementSource(audio);
-  src.connect(an);an.connect(ac.destination);
-  bandsSetup(ac.sampleRate);
-  audio.onended=()=>{stopMic();$('state').textContent='File finished';};
-  audio.play().then(()=>{
-    running=true;smooth=[];probHist=[];logs=[];frames=0;
-    timerId=setInterval(tick,200);
-    $('mic').textContent='■ Stop';
-    $('state').textContent='Analysing file: '+file.name;
-  }).catch(e=>showErr('Could not play this file: '+e.message));
+  if(!model){showErr('The model is still loading. Try again in a moment.');return;}
+  $('state').textContent='Decoding '+file.name+' ...';
+  try{
+    const bytes=await file.arrayBuffer();
+    const actx=new (window.AudioContext||window.webkitAudioContext)();
+    const decoded=await actx.decodeAudioData(bytes);
+    await actx.close();
+    const ch=decoded.getChannelData(0),sr=decoded.sampleRate;
+    const F=[];
+    for(let i=0,n=0;i+NFFT<=ch.length;i+=NFFT,n++){
+      const f=featuresFromFrame(ch.subarray(i,i+NFFT),sr);
+      if(f[0]>=0.008)F.push(f);
+      if(n%200===199)await new Promise(r=>setTimeout(r,0));
+    }
+    if(!F.length){
+      showErr('No speech or sound was detected in this file.');
+      $('state').textContent='No audio detected';
+      return;
+    }
+    const P=predictBatch(F);
+    const mean=EM.map((_,c)=>P.reduce((s,p)=>s+p[c],0)/P.length);
+    const fm=F[0].map((_,j)=>F.reduce((s,f)=>s+f[j],0)/F.length);
+    dom=mean.indexOf(Math.max(...mean));
+    probHist=P;
+    frames=F.length;
+    const step=Math.max(1,Math.floor(P.length/12));
+    logs=[];
+    for(let i=0;i<P.length&&logs.length<12;i+=step){
+      const d=P[i].indexOf(Math.max(...P[i]));
+      logs.push({e:EM[d],c:COL[d],t:(i*NFFT/sr).toFixed(1)+' s'});
+    }
+    render(mean,fm);
+    $('state').textContent='Analysed '+file.name+': '+(ch.length/sr).toFixed(1)+' s, '+F.length+' voiced frames';
+  }catch(e){
+    showErr('Could not decode this file ('+e.message+'). Use WAV, MP3, OGG, M4A or FLAC.');
+    $('state').textContent='File not analysed';
+  }
+}
+
+async function initModel(){
+  try{
+    model=await tf.loadLayersModel('models/emotion/model.json');
+    const n=await (await fetch('models/emotion/norm.json')).json();
+    mu=n.mu;sg=n.sg;
+    $('kAcc').textContent=n.test_acc!=null?pct(n.test_acc):'-';
+    $('mic').disabled=false;
+    $('mic').textContent='Start microphone';
+    $('state').textContent='Trained RAVDESS model loaded. Start the mic or upload a file.';
+  }catch(e){
+    await train();
+  }
 }
 
 $('mic').onclick=toggleMic;
 $('file').onchange=e=>useFile(e.target.files[0]);
 $('feat').innerHTML=FN.map(n=>`<div class="tile"><b>–</b>${n}</div>`).join('');
 requestAnimationFrame(draw);
-train();
+initModel();
 </script>
 </body>
 </html>
